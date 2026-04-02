@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-cr9s18z(ig$l!paa$x4+)kx(cb8cr!789-(&wb^h85#f_&%yc1
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'testserver']
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 
 
 # Application definition
@@ -38,15 +38,18 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'corsheaders',
     'rest_framework',
     'courses',
     'enrollment',
+    'EventStreamDemo',
 ]
 
 # Use the custom user model from the `courses` app.
 AUTH_USER_MODEL = 'courses.User'
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -146,3 +149,27 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
 }
+
+# CORS settings (development)
+# Allow origins used by the frontend dev servers (Live Server / Vite / CRA)
+CORS_ALLOWED_ORIGINS = [
+    'http://127.0.0.1:5500',
+    'http://localhost:5500',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+
+# If you prefer to allow all origins during development, set the following instead:
+# CORS_ALLOW_ALL_ORIGINS = True
+
+# Allow credentials (cookies, Authorization headers) to be sent in cross-site requests
+CORS_ALLOW_CREDENTIALS = True
+
+# Allow Authorization header and other common headers during preflight
+from corsheaders.defaults import default_headers
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'authorization',
+]
+
+CORS_PREFLIGHT_MAX_AGE = 0

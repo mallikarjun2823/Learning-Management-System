@@ -2,6 +2,8 @@ from .models import User, Course, Module, Lesson, RoleLookup
 from .serializers import RegisterSerializer, LoginSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from enrollment.models import Enrollment
+import os
+import time
 
 class AuthService:
     def generate_tokens_for_user(self, user):
@@ -60,37 +62,28 @@ class AuthService:
 class CourseService:
 
     def list_courses(self, user):
-        """List courses based on user role.
-        
-        - Students: return courses they are enrolled in
-        - Instructors: return courses they teach
-        - Others: return empty queryset
-        """
-        if not getattr(user, 'is_authenticated', False):
-            return Course.objects.none()
-        
-        user_role_num = getattr(getattr(user, 'role', None), 'role_num', None)
+        # Stream the loremtxt.txt file as Server-Sent Events (SSE) so the
+        # server keeps the connection open and continuously sends data
+        # even if the client doesn't make additional requests.
+        def _stream_sse(chunk_size=1024, interval=0.1):
+            project_root = os.path.dirname(os.path.dirname(__file__))
+            file_path = os.path.join(project_root, 'loremtxt.txt')
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        # SSE event: prefix with 'data:' and end with double newline
+                        yield f"data: {chunk}\n\n"
+                        time.sleep(interval)
+                # After file ends, keep sending heartbeat events indefinitely
+                
+            except FileNotFoundError:
+                raise ValueError("loremtxt.txt not found in project root.")
 
-        if user_role_num == 'STUD':
-            # Return courses the student is enrolled in via Enrollment
-            return (
-                Course.objects.filter(
-                    enrollments__user=user,
-                    enrollments__status=Enrollment.Status.ACTIVE,
-                )
-                .select_related('instructor')
-                .distinct()
-            )
-        elif user_role_num == 'INST':
-            # Return courses the instructor teaches
-            return (
-                user.instructed_courses.all()
-                .select_related('instructor')
-                .prefetch_related('enrollments')
-            )
-        else:
-            # For other roles (ADMIN, etc.), return empty
-            return Course.objects.none()
+        return _stream_sse()
+        
     
     def create_course(self, user, title, description):
         if not title.strip():

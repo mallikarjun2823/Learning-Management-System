@@ -4,6 +4,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
+from django.http import StreamingHttpResponse
+import json
+import time
+from rest_framework.renderers import JSONRenderer
 from .services import AuthService, CourseService, CourseDetailService
 from .serializers import RegisterSerializer, LoginSerializer, CourseSerializer, CourseDetailSerializer, CourseListSerializer
 from .permissions import CoursePermission
@@ -122,10 +126,16 @@ class LogoutView(APIView):
         _clear_token_cookie(response, getattr(settings, "AUTH_COOKIE_REFRESH", "refresh_token"))
         return response
 
+from .renderers import EventStreamRenderer
+
+
 class CourseView(APIView):
     serializer_class = CourseSerializer
     list_serializer_class = CourseListSerializer
     service_class = CourseService
+    # Register renderer classes (classes, not instances) so DRF knows about
+    # the supported media types for content negotiation.
+    renderer_classes = [EventStreamRenderer, JSONRenderer]
     def get_permissions(self):
         if self.request.method in ['POST', 'PUT', 'DELETE']:
             return [IsAuthenticated(), CoursePermission()]
@@ -134,7 +144,39 @@ class CourseView(APIView):
     def get(self, request):
         service = self.service_class()
         try:
-            courses = service.list_courses(request.user)
+            accept = request.META.get('HTTP_ACCEPT', '')
+            # If client explicitly requests SSE, force streaming response
+            if 'text/event-stream' in accept:
+                stream = service.list_courses(request.user)
+                # ensure DRF has an accepted_renderer for exception handling
+                try:
+                    sse_renderer = EventStreamRenderer()
+                except Exception:
+                    sse_renderer = None
+                if sse_renderer is not None:
+                    request.accepted_renderer = sse_renderer
+                    request.accepted_media_type = sse_renderer.media_type
+                resp = StreamingHttpResponse(stream, content_type='text/event-stream')
+                resp['Cache-Control'] = 'no-cache'
+                resp['X-Accel-Buffering'] = 'no',
+                
+                return resp
+
+            result = service.list_courses(request.user)
+            # If the service returns an iterator/generator, return SSE by default
+            if hasattr(result, '__iter__') and not hasattr(result, '__len__'):
+                try:
+                    sse_renderer = EventStreamRenderer()
+                except Exception:
+                    sse_renderer = None
+                if sse_renderer is not None:
+                    request.accepted_renderer = sse_renderer
+                    request.accepted_media_type = sse_renderer.media_type
+                resp = StreamingHttpResponse(result, content_type='text/event-stream')
+                resp['Cache-Control'] = 'no-cache'
+                resp['X-Accel-Buffering'] = 'no'
+                return resp
+            courses = result
             serializer = self.list_serializer_class(courses, many=True)
             return Response(serializer.data)
         except Exception as e:
@@ -155,14 +197,31 @@ class CourseView(APIView):
 class CourseDetailView(APIView):
     serializer_class = CourseDetailSerializer
     service_class = CourseDetailService
+    # Support SSE on detail view as well
+    renderer_classes = [EventStreamRenderer, JSONRenderer]
     def get_permissions(self):
         return [IsAuthenticated(), CoursePermission()]    
 
     def get(self, request, course_id):
         service = self.service_class()
         try:
+            accept = request.META.get('HTTP_ACCEPT', '')
             course = service.get_course_detail(request.user, course_id)
             serializer = self.serializer_class(course)
+
+            # If client requests SSE, return streaming SSE containing the
+            # serialized course JSON, then keep connection alive with heartbeats.
+            if 'text/event-stream' in accept:
+                def _sse_stream():
+                    yield 'data: ' + json.dumps(serializer.data) + '\n\n'
+                    while True:
+                        yield 'data: [heartbeat]\n\n'
+                        time.sleep(1)
+                resp = StreamingHttpResponse(_sse_stream(), content_type='text/event-stream')
+                resp['Cache-Control'] = 'no-cache'
+                resp['X-Accel-Buffering'] = 'no'
+                return resp
+
             return Response(serializer.data)
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)

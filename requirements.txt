@@ -3,3 +3,4 @@ djangorestframework
 pyJWT
 djangorestframework-simplejwt
 Pillow
+django-cors-headers

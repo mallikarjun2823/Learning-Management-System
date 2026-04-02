@@ -21,4 +21,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('courses.urls')),
     path('api/', include('enrollment.urls')),
+    path('api/', include('EventStreamDemo.urls')),
 ]
